@@ -2354,7 +2354,7 @@ Return JSON: {"new_threats":["new threat not in previous"],"resolved_issues":["i
       setStep('critic','active');
       log(`  model: ${getAgentModel('critic')}`, 'info');
       log('Critic evaluating report quality…');
-      const criticResult = await runCriticAgent(form, sections, scoutData, crossVal, validation);
+      const criticResult = await runCriticAgent(form, sections, scoutData, crossValResult, validation);
       qualityScore = criticResult;
       log(`Critic: quality ${criticResult.quality_score}/100 · grade: ${criticResult.grade||'—'}`, criticResult.quality_score>=70?'success':'warn');
       // IMPROVEMENT 5: persist Critic instructions for next run
