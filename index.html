@@ -1,6 +1,64 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
+<script id="gpt6-luna-shim">
+/* gpt-6-luna: modelo por defecto con temperatura=1 (actualización sep-2026).
+   Adapta las peticiones a la API de OpenAI para la familia gpt-6:
+   temperature=1, max_tokens -> max_completion_tokens (con margen para razonamiento)
+   y reintento automático si la API rechaza algún parámetro. */
+(function(){
+  var NEW='gpt-6-luna', OLD='gpt-4o-mini';
+  try{
+    if(!localStorage.getItem('__gpt6_luna_mig_v1')){
+      for(var i=0;i<localStorage.length;i++){
+        var k=localStorage.key(i), v=localStorage.getItem(k);
+        if(v===OLD||v==='"'+OLD+'"'){ localStorage.setItem(k, v.replace(OLD,NEW)); continue; }
+        if(v && v.length<20000 && v.charAt(0)==='{' && v.indexOf(OLD)>=0){
+          try{ var o=JSON.parse(v), ch=false;
+            for(var p in o){ if(o[p]===OLD){ o[p]=NEW; ch=true; } }
+            if(ch) localStorage.setItem(k, JSON.stringify(o));
+          }catch(e){}
+        }
+      }
+      localStorage.setItem('__gpt6_luna_mig_v1','1');
+    }
+  }catch(e){}
+  var of=window.fetch; if(!of) return;
+  function adapt(url,b){
+    if(!b || typeof b.model!=='string' || !/^gpt-6/.test(b.model)) return false;
+    b.temperature=1;
+    ['top_p','frequency_penalty','presence_penalty','logit_bias','logprobs','top_logprobs'].forEach(function(p){ delete b[p]; });
+    if(/chat\/completions/.test(url) && b.max_tokens!=null){
+      if(b.max_completion_tokens==null) b.max_completion_tokens=Math.min(128000, (+b.max_tokens||0)+6000);
+      delete b.max_tokens;
+    }
+    return true;
+  }
+  window.fetch=function(input,init){
+    var url=typeof input==='string'?input:(input&&input.url)||'';
+    if(!/api\.openai\.com\/v1\/(chat\/completions|responses)/.test(url) || !init || typeof init.body!=='string') return of.apply(this,arguments);
+    var b; try{ b=JSON.parse(init.body); }catch(e){ return of.apply(this,arguments); }
+    if(!adapt(url,b)) return of.apply(this,arguments);
+    var self=this, tries=0;
+    function go(){
+      var ini=Object.assign({},init,{body:JSON.stringify(b)});
+      return of.call(self,input,ini).then(function(r){
+        if(r.status!==400 || tries>=3) return r;
+        return r.clone().json().then(function(j){
+          var err=(j&&j.error)||{}, p=err.param, msg=String(err.message||'');
+          if(!p){ var m=msg.match(/'([a-z_]+)'/); if(m) p=m[1]; }
+          if(p && b.hasOwnProperty(p) && /unsupported|not supported|does not support|only the default/i.test(msg)){
+            delete b[p]; tries++; return go();
+          }
+          return r;
+        },function(){ return r; });
+      });
+    }
+    return go();
+  };
+})();
+</script>
+
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Invigilando — Competitive Intelligence</title>
@@ -647,7 +705,7 @@ select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='ht
           <label>Global Default Model</label>
           <span style="font-size:11px;color:var(--ink-muted)">Applied to all agents unless overridden below</span>
           <select id="set-global-model" style="width:100%;font-size:13px;padding:7px 10px">
-            <option value="gpt-4o-mini">gpt-4o-mini — Fast &amp; cheap (recommended)</option>
+            <option value="gpt-6-luna" selected>gpt-6-luna · más capaz y más barato (recomendado)</option><option value="gpt-4o-mini">gpt-4o-mini — Fast &amp; cheap</option>
             <option value="gpt-4o">gpt-4o — Most capable</option>
             <option value="gpt-4-turbo">gpt-4-turbo — Balanced</option>
             <option value="gpt-4">gpt-4 — Classic</option>
@@ -1086,7 +1144,7 @@ function updateOverrideCountBadge() {
 // ═══════════════════════════════════════════════
 // Cost per 1K tokens (input+output combined approx), in USD cents
 const MODEL_COST_PER_1K = {
-  'gpt-4o-mini': 0.015, 'gpt-3.5-turbo': 0.01,
+  'gpt-6-luna': 0.01, 'gpt-4o-mini': 0.015, 'gpt-3.5-turbo': 0.01,
   'gpt-4o': 0.15, 'gpt-4-turbo': 0.12, 'gpt-4': 0.09,
   'o1-mini': 0.11, 'o3-mini': 0.14
 };
@@ -1119,7 +1177,7 @@ function updateEstimator() {
   const breakdown = [];
 
   activeAgents.forEach(a => {
-    const model = typeof getAgentModel !== 'undefined' ? getAgentModel(a.id) : 'gpt-4o-mini';
+    const model = typeof getAgentModel !== 'undefined' ? getAgentModel(a.id) : 'gpt-6-luna';
     const costPer1k = MODEL_COST_PER_1K[model] || MODEL_COST_PER_1K['gpt-4o-mini'];
     const tokens = (AGENT_TOKENS[a.id] || 2000) * (a.id === 'analyst' ? depthMultiplier : 1);
     const secs = (AGENT_SECS[a.id] || 8) * (a.id === 'scout' || a.id === 'analyst' ? depthMultiplier : 1);
@@ -1375,7 +1433,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 function renderAgentsGrid() {
   const grid = document.getElementById('agents-grid');
   grid.innerHTML = AGENTS.map(a => {
-    const model = typeof getAgentModel !== 'undefined' ? getAgentModel(a.id) : 'gpt-4o-mini';
+    const model = typeof getAgentModel !== 'undefined' ? getAgentModel(a.id) : 'gpt-6-luna';
     const isOverride = localStorage.getItem(`ci_model_${a.id}`) && localStorage.getItem(`ci_model_${a.id}`) !== 'global';
     return `<div class="agent-toggle active" id="ag-${a.id}" onclick="toggleAgent('${a.id}')" title="${a.required?'Required — cannot disable':'Click to toggle'}">
       <div class="agent-dot"></div>
@@ -1423,6 +1481,7 @@ function openSettings(tab) {
 function closeSettings() { document.getElementById('settings-overlay').classList.remove('open'); }
 
 const OPENAI_MODELS = [
+  {value:'gpt-6-luna',   label:'gpt-6-luna — Smarter & cheaper (default)', cost:1},
   {value:'gpt-4o-mini',  label:'gpt-4o-mini — Fast & cheap', cost:1},
   {value:'gpt-4o',       label:'gpt-4o — Most capable',      cost:3},
   {value:'gpt-4-turbo',  label:'gpt-4-turbo — Balanced',     cost:2},
@@ -1434,8 +1493,8 @@ const OPENAI_MODELS = [
 
 function getGlobalModel() {
   const stored = localStorage.getItem('ci_global_model');
-  if(stored === 'custom') return localStorage.getItem('ci_custom_model') || 'gpt-4o-mini';
-  return stored || 'gpt-4o-mini';
+  if(stored === 'custom') return localStorage.getItem('ci_custom_model') || 'gpt-6-luna';
+  return stored || 'gpt-6-luna';
 }
 
 function getAgentModel(agentId) {
@@ -1491,7 +1550,7 @@ function loadSettingsToForm() {
   const globalSel = document.getElementById('set-global-model');
   const customInp = document.getElementById('set-custom-model');
   if(globalSel) {
-    const stored = localStorage.getItem('ci_global_model') || 'gpt-4o-mini';
+    const stored = localStorage.getItem('ci_global_model') || 'gpt-6-luna';
     // Check if stored value is in predefined list
     const known = [...OPENAI_MODELS.map(m=>m.value),'custom'];
     globalSel.value = known.includes(stored) ? stored : 'custom';
